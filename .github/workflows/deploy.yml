@@ -1,15 +1,19 @@
 name: Deploy to GitHub Pages
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
 permissions:
   contents: read
   pages: write
   id-token: write
+
 concurrency:
   group: pages
   cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -18,8 +22,25 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Extract source and build
+        run: |
+          tar xzf seenit-src.tar.gz
+          npm install
+          npm run build
+        env:
+          VITE_TMDB_API_KEY: f2e050f389b4fa5390e647d01fea33aa
+          VITE_OMDB_API_KEY: ae4070dd
+          VITE_TRAKT_CLIENT_ID: 63f699ae904e235385e08c4027c6ddc11fd3787d739b88383741cdea05e78638
+          VITE_TRAKT_CLIENT_SECRET: aa74b903200c209e408a437cde0638f157ee77fbef25b42ab68645ba4662d12c
+
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: docs
+          path: dist
+
       - id: deployment
         uses: actions/deploy-pages@v4
