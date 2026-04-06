@@ -1,0 +1,46 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx vite build --base=/seenit/
+        env:
+          VITE_TRAKT_CLIENT_ID: 63f699ae904e235385e08c4027c6ddc11fd3787d739b88383741cdea05e78638
+          VITE_TRAKT_CLIENT_SECRET: aa74b903200c209e408a437cde0638f157ee77fbef25b42ab68645ba4662d12c
+          VITE_TMDB_API_KEY: f2e050f389b4fa5390e647d01fea33aa
+          VITE_OMDB_API_KEY: ae4070dd
+      - run: cp dist/index.html dist/404.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
