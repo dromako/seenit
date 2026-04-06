@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #14141f;
+  --bg-card: #1a1a2e;
+  --bg-hover: #222240;
+  --text-primary: #e8e8f0;
+  --text-secondary: #9898b0;
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --green: #22c55e;
+  --red: #ef4444;
+  --blue: #3b82f6;
+  --yellow: #eab308;
+  --orange: #f97316;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100dvh;
+  overscroll-behavior: none;
+}
+
+/* Status badge colors */
+.status-watched { color: var(--green); }
+.status-hidden { color: var(--red); }
+.status-watchlisted { color: var(--blue); }
+.status-new { color: var(--text-secondary); }
+
+/* Rating stars */
+.rating-bar { display: flex; gap: 4px; }
+.rating-bar button { background: none; border: none; font-size: 1.5rem; cursor: pointer; transition: transform 0.1s; }
+.rating-bar button:active { transform: scale(1.2); }
+.rating-bar button.active { color: var(--yellow); }
+.rating-bar button.inactive { color: #333; }
+
+/* Smooth transitions */
+.fade-in { animation: fadeIn 0.2s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Card styles */
+.card {
+  background: var(--bg-card);
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+  transition: background 0.15s;
+}
+.card:hover { background: var(--bg-hover); }
+
+/* Safe area for iPhone */
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 16px); }
