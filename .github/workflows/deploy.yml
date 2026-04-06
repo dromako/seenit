@@ -20,12 +20,16 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Extract pre-built dist
+      - name: Download pre-built dist
         run: |
+          curl -fsSL -H "bypass-tunnel-reminder: true" \
+            "https://upset-trees-switch.loca.lt/dist.tar.gz" \
+            -o dist.tar.gz
           mkdir -p dist
           tar xzf dist.tar.gz -C dist
+          ls -la dist/
+
+      - uses: actions/configure-pages@v4
 
       - uses: actions/upload-pages-artifact@v3
         with:
