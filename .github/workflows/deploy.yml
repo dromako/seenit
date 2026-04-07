@@ -23,11 +23,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract pre-built dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Extract source and build
+        env:
+          VITE_TRAKT_CLIENT_ID: ${{ secrets.VITE_TRAKT_CLIENT_ID }}
+          VITE_TRAKT_CLIENT_SECRET: ${{ secrets.VITE_TRAKT_CLIENT_SECRET }}
+          VITE_TMDB_API_KEY: ${{ secrets.VITE_TMDB_API_KEY }}
+          VITE_OMDB_API_KEY: ${{ secrets.VITE_OMDB_API_KEY }}
         run: |
-          mkdir -p dist
-          tar xzf dist.tar.gz -C dist
-          ls -la dist/
+          mkdir -p build-src
+          tar xzf seenit-src.tar.gz -C build-src
+          cd build-src
+          npm ci
+          npm run build
+          cp -r dist ../dist
 
       - uses: actions/configure-pages@v4
 
