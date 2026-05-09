@@ -1,5 +1,7 @@
 node_modules
 dist
+dist-deploy
+dist-ghpages
 .env
 *.local
 .DS_Store

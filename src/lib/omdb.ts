@@ -1,6 +1,6 @@
 /**
  * OMDB API Client
- * Handles IMDB ratings, Metacritic, and Rotten Tomatoes scores
+ * Handles IMDB ratings and Metacritic scores
  */
 
 const OMDB_BASE_URL = 'https://www.omdbapi.com';
@@ -26,8 +26,22 @@ export interface RatingsObject {
 }
 
 /**
- * Get OMDB data by IMDB ID
- * Returns parsed ratings object with IMDB, Metacritic, and Rotten Tomatoes scores
+ * Fetch with timeout — OMDB sometimes hangs, which blocks the ratings row.
+ */
+async function fetchWithTimeout(url: string, timeoutMs = 6000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    return response;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Get OMDB data by IMDB ID — with 1 automatic retry on failure.
+ * Returns parsed ratings object with IMDB and Metacritic scores.
  */
 export async function getOMDBData(imdbId: string): Promise<RatingsObject> {
   const emptyRatings: RatingsObject = {
@@ -36,51 +50,47 @@ export async function getOMDBData(imdbId: string): Promise<RatingsObject> {
     rottenTomatoes: null,
   };
 
-  if (!imdbId) {
+  if (!imdbId || !OMDB_API_KEY) {
     return emptyRatings;
   }
 
-  try {
-    const response = await fetch(
-      `${OMDB_BASE_URL}/?apikey=${OMDB_API_KEY}&i=${encodeURIComponent(imdbId)}&type=movie,series`
-    );
+  const url = `${OMDB_BASE_URL}/?apikey=${OMDB_API_KEY}&i=${encodeURIComponent(imdbId)}`;
 
-    if (!response.ok) {
-      console.error('OMDB request failed:', response.statusText);
-      return emptyRatings;
-    }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetchWithTimeout(url);
 
-    const data = (await response.json()) as OMDBResponse;
-
-    if (data.Response === 'False') {
-      console.warn('OMDB not found:', imdbId);
-      return emptyRatings;
-    }
-
-    const ratings: RatingsObject = {
-      imdb: data.imdbRating && data.imdbRating !== 'N/A'
-        ? parseFloat(data.imdbRating)
-        : null,
-      metacritic:
-        data.Metascore && data.Metascore !== 'N/A'
-          ? parseInt(data.Metascore)
-          : null,
-      rottenTomatoes: null,
-    };
-
-    // Extract Rotten Tomatoes from Ratings array
-    if (data.Ratings && Array.isArray(data.Ratings)) {
-      const rtRating = data.Ratings.find((r) => r.Source === 'Rotten Tomatoes');
-      if (rtRating) {
-        ratings.rottenTomatoes = rtRating.Value;
+      if (!response.ok) {
+        console.warn(`[OMDB] request failed (attempt ${attempt + 1}):`, response.status);
+        if (attempt === 0) { await new Promise(r => setTimeout(r, 800)); continue; }
+        return emptyRatings;
       }
-    }
 
-    return ratings;
-  } catch (error) {
-    console.error('Error fetching OMDB data:', error);
-    return emptyRatings;
+      const data = (await response.json()) as OMDBResponse;
+
+      if (data.Response === 'False') {
+        console.warn('[OMDB] not found:', imdbId);
+        return emptyRatings;
+      }
+
+      return {
+        imdb: data.imdbRating && data.imdbRating !== 'N/A'
+          ? parseFloat(data.imdbRating)
+          : null,
+        metacritic:
+          data.Metascore && data.Metascore !== 'N/A'
+            ? parseInt(data.Metascore)
+            : null,
+        rottenTomatoes: null,
+      };
+    } catch (error) {
+      console.warn(`[OMDB] fetch error (attempt ${attempt + 1}):`, error);
+      if (attempt === 0) { await new Promise(r => setTimeout(r, 800)); continue; }
+      return emptyRatings;
+    }
   }
+
+  return emptyRatings;
 }
 
 /**

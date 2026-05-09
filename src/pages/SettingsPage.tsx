@@ -387,7 +387,7 @@ export default function SettingsPage() {
             marginTop: '12px'
           }}>
             <a
-              href="https://github.com"
+              href="https://github.com/dromako/seenit"
               target="_blank"
               rel="noopener noreferrer"
               style={{

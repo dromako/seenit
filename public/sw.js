@@ -1,10 +1,10 @@
 const CACHE_NAME = 'seenit-v1';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/favicon.svg',
-  '/icons.svg',
+  '/seenit/',
+  '/seenit/index.html',
+  '/seenit/manifest.json',
+  '/seenit/favicon.svg',
+  '/seenit/icons.svg',
 ];
 
 // Install — cache static shell

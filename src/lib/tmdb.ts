@@ -288,3 +288,21 @@ export function getPosterUrl(posterPath: string | null): string | null {
   if (!posterPath) return null;
   return `${TMDB_POSTER_BASE}${posterPath}`;
 }
+
+/**
+ * Search TMDB keywords by name — used by the "describe the shelf" feature.
+ * Returns keyword objects with id and name.
+ */
+export async function searchKeywords(query: string): Promise<Array<{ id: number; name: string }>> {
+  const API_KEY = import.meta.env.VITE_TMDB_API_KEY;
+  const params = new URLSearchParams({ api_key: API_KEY, query });
+  const url = `https://api.themoviedb.org/3/search/keyword?${params.toString()}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.results || []).slice(0, 5);
+  } catch {
+    return [];
+  }
+}

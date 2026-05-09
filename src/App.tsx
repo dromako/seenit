@@ -1,15 +1,17 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import BrowsePage from './pages/BrowsePage';
 import HomePage from './pages/HomePage';
 import LookupPage from './pages/LookupPage';
 import TitlePage from './pages/TitlePage';
 import HistoryPage from './pages/HistoryPage';
 import SettingsPage from './pages/SettingsPage';
 import TraktAuthPage from './pages/TraktAuthPage';
+import WatchPage from './pages/WatchPage';
 import NavBar from './components/NavBar';
 
 function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/seenit">
       <div style={{
         minHeight: '100dvh',
         display: 'flex',
@@ -24,13 +26,15 @@ function App() {
           padding: '0 16px 80px',
         }}>
           <Routes>
-            <Route path="/" element={<HomePage />} />
+            <Route path="/" element={<BrowsePage />} />
+            <Route path="/search" element={<HomePage />} />
             <Route path="/lookup" element={<LookupPage />} />
             <Route path="/title/:tmdbId/:mediaType" element={<TitlePage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/auth/trakt" element={<TraktAuthPage />} />
             <Route path="/auth/callback" element={<TraktAuthPage />} />
+            <Route path="/watch/:mediaType/:imdbId" element={<WatchPage />} />
           </Routes>
         </div>
         <NavBar />

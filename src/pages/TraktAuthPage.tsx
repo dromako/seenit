@@ -44,15 +44,17 @@ export default function TraktAuthPage() {
 
     let intervalId: ReturnType<typeof setInterval> | null = null;
     let mounted = true;
+    const MAX_ATTEMPTS = 120; // ~10 min at 5s interval
 
     const startPolling = async () => {
-      while (mounted) {
+      let attempts = 0;
+      while (mounted && attempts < MAX_ATTEMPTS) {
+        attempts++;
         try {
           const success = await pollForToken(deviceCode);
           if (success && mounted) {
             setPolling(false);
             setSuccess(true);
-            // Redirect after 2 seconds
             setTimeout(() => {
               if (mounted) {
                 navigate('/');
@@ -68,6 +70,12 @@ export default function TraktAuthPage() {
         await new Promise((resolve) => {
           intervalId = setTimeout(resolve, pollingInterval * 1000);
         });
+      }
+
+      // Timed out
+      if (mounted) {
+        setPolling(false);
+        setError('Authorization timed out. Please try again.');
       }
     };
 

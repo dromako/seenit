@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { searchTMDB } from '../lib/tmdb';
+import { isTraktAuthenticated, getWatchedMovies, getWatchedShows, getHiddenItems, getWatchlist } from '../lib/trakt';
 
 interface SearchResult {
   id: number;
@@ -8,6 +9,7 @@ interface SearchResult {
   media_type: string;
   year: number | null;
   poster_path: string | null;
+  traktStatus?: 'watched' | 'hidden' | 'watchlisted';
 }
 
 export default function LookupPage() {
@@ -33,7 +35,7 @@ export default function LookupPage() {
         const tmdbResults = await searchTMDB(query, 'multi');
 
         // Filter to only movie/tv (exclude person results) and normalize media_type
-        const formatted = tmdbResults
+        const formatted: SearchResult[] = tmdbResults
           .filter((item) => item.media_type === 'movie' || item.media_type === 'tv')
           .map((item) => ({
             id: item.id,
@@ -41,7 +43,50 @@ export default function LookupPage() {
             media_type: item.media_type,
             year: item.year,
             poster_path: item.poster_path,
+            traktStatus: undefined,
           }));
+
+        // Fetch Trakt data if authenticated
+        if (isTraktAuthenticated()) {
+          try {
+            const watchedMovies = await getWatchedMovies();
+            const watchedShows = await getWatchedShows();
+            const hiddenMovies = await getHiddenItems('movies');
+            const hiddenShows = await getHiddenItems('shows');
+            const watchlistMovies = await getWatchlist('movies');
+            const watchlistShows = await getWatchlist('shows');
+
+            const dataMap = new Map<string, 'watched' | 'hidden' | 'watchlisted'>();
+
+            // Build map of TMDB ID -> Trakt status
+            watchedMovies.forEach(item => {
+              if (item.ids.tmdb) dataMap.set(`movie-${item.ids.tmdb}`, 'watched');
+            });
+            watchedShows.forEach(item => {
+              if (item.ids.tmdb) dataMap.set(`tv-${item.ids.tmdb}`, 'watched');
+            });
+            hiddenMovies.forEach(item => {
+              if (item.ids.tmdb) dataMap.set(`movie-${item.ids.tmdb}`, 'hidden');
+            });
+            hiddenShows.forEach(item => {
+              if (item.ids.tmdb) dataMap.set(`tv-${item.ids.tmdb}`, 'hidden');
+            });
+            watchlistMovies.forEach(item => {
+              if (item.ids.tmdb) dataMap.set(`movie-${item.ids.tmdb}`, 'watchlisted');
+            });
+            watchlistShows.forEach(item => {
+              if (item.ids.tmdb) dataMap.set(`tv-${item.ids.tmdb}`, 'watchlisted');
+            });
+
+            // Cross-reference results with Trakt data
+            formatted.forEach(result => {
+              const key = `${result.media_type}-${result.id}`;
+              result.traktStatus = dataMap.get(key);
+            });
+          } catch (traktErr) {
+            console.error('Error fetching Trakt data:', traktErr);
+          }
+        }
 
         setResults(formatted);
 
@@ -180,9 +225,21 @@ export default function LookupPage() {
                   marginBottom: '4px',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
+                  whiteSpace: 'nowrap',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
                 }}>
                   {result.title}
+                  {result.traktStatus === 'watched' && (
+                    <span title="Watched" style={{ fontSize: '16px' }}>✅</span>
+                  )}
+                  {result.traktStatus === 'hidden' && (
+                    <span title="Hidden" style={{ fontSize: '16px', color: 'var(--red)' }}>❌</span>
+                  )}
+                  {result.traktStatus === 'watchlisted' && (
+                    <span title="Watchlisted" style={{ fontSize: '16px' }}>📋</span>
+                  )}
                 </div>
                 <div style={{
                   display: 'flex',

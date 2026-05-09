@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { cacheGet, cacheSet } from '../lib/storage';
 import { getWatchedMovies, getWatchedShows, getHiddenItems, getWatchlist, isTraktAuthenticated } from '../lib/trakt';
+import { getWatchProviders } from '../lib/tmdb';
 
 type FilterTab = 'all' | 'watched' | 'hidden' | 'watchlist';
 
@@ -14,6 +15,7 @@ interface TitleItem {
   status: 'watched' | 'hidden' | 'watchlisted';
   rating?: number;
   tmdbId?: number;
+  hasFreeProvider?: boolean;
 }
 
 const TMDB_POSTER_SMALL = 'https://image.tmdb.org/t/p/w200';
@@ -46,16 +48,31 @@ async function fetchPosters(items: TitleItem[]): Promise<Map<number, string>> {
   return posterMap;
 }
 
+// Check if item has free/ads watch providers
+async function checkFreeProviders(item: TitleItem): Promise<boolean> {
+  if (!item.tmdbId) return false;
+  try {
+    const providers = await getWatchProviders(item.tmdbId, item.mediaType);
+    if (!providers?.results?.US) return false;
+    const usProviders = providers.results.US;
+    return !!(usProviders.free || usProviders.ads);
+  } catch {
+    return false;
+  }
+}
+
 export default function HistoryPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialTab = (searchParams.get('tab') as FilterTab) || 'all';
+  const urlFilter = searchParams.get('filter') || null;
   const [filter, setFilter] = useState<FilterTab>(initialTab);
   const [items, setItems] = useState<TitleItem[]>([]);
   const [filteredItems, setFilteredItems] = useState<TitleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const showingFreeOnly = urlFilter === 'free';
 
   useEffect(() => {
     if (!isTraktAuthenticated()) {
@@ -163,6 +180,15 @@ export default function HistoryPage() {
             });
           }
 
+          // Check for free providers if filter is active
+          if (urlFilter === 'free') {
+            await Promise.allSettled(
+              allItems.map(async (item) => {
+                item.hasFreeProvider = await checkFreeProviders(item);
+              })
+            );
+          }
+
           setItems(allItems);
           cacheSet(cacheKey, allItems, 60); // Cache for 1 hour
         }
@@ -191,6 +217,16 @@ export default function HistoryPage() {
       });
     }
 
+    // Apply free provider filter
+    if (showingFreeOnly) {
+      result = result.sort((a, b) => {
+        // Sort items with free providers to top
+        const aFree = a.hasFreeProvider ? 1 : 0;
+        const bFree = b.hasFreeProvider ? 1 : 0;
+        return bFree - aFree;
+      });
+    }
+
     // Apply search filter
     if (searchQuery.trim()) {
       result = result.filter((item) =>
@@ -199,7 +235,7 @@ export default function HistoryPage() {
     }
 
     setFilteredItems(result);
-  }, [items, filter, searchQuery]);
+  }, [items, filter, searchQuery, showingFreeOnly]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -270,6 +306,25 @@ export default function HistoryPage() {
           }}
         />
       </div>
+
+      {/* Free filter indicator */}
+      {showingFreeOnly && (
+        <div style={{
+          backgroundColor: 'rgba(34, 197, 94, 0.1)',
+          borderRadius: '8px',
+          padding: '12px',
+          marginBottom: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          color: 'var(--green)',
+          fontSize: '13px',
+          fontWeight: '500'
+        }}>
+          <span style={{ fontSize: '16px' }}>🆓</span>
+          <span>Showing Free Sources (sorted by availability)</span>
+        </div>
+      )}
 
       {/* Filter tabs */}
       <div style={{
@@ -406,6 +461,25 @@ export default function HistoryPage() {
                     }}
                   >
                     {item.title.charAt(0).toUpperCase()}
+                  </div>
+                )}
+
+                {/* Free provider badge */}
+                {showingFreeOnly && item.hasFreeProvider && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '4px',
+                      left: '4px',
+                      backgroundColor: 'rgba(34, 197, 94, 0.9)',
+                      color: 'white',
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      fontWeight: '600'
+                    }}
+                  >
+                    🆓 Free
                   </div>
                 )}
 

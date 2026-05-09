@@ -1,7 +1,8 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 
 const tabs = [
-  { path: '/', label: 'Search', icon: '🔍' },
+  { path: '/', label: 'Browse', icon: '⚡' },
+  { path: '/search', label: 'Search', icon: '🔍' },
   { path: '/history', label: 'Library', icon: '📚' },
   { path: '/settings', label: 'Settings', icon: '⚙️' },
 ];

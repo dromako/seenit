@@ -14,6 +14,11 @@
   --blue: #3b82f6;
   --yellow: #eab308;
   --orange: #f97316;
+
+  /* Bookshop design tokens — warm, worn, not precious */
+  --warm-amber: #c9a96e;         /* Dog-eared corner, fellow traveler accent */
+  --sepia-muted: #8a7355;        /* Faded subtitle text on FT rows */
+  --paper-warm: rgba(201,169,110,0.04);  /* Almost invisible warm tint on FT rows */
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -55,3 +60,12 @@ body {
 
 /* Safe area for iPhone */
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 16px); }
+
+/* Skeleton loading pulse */
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.15; }
+}
+
+/* Hide scrollbar on genre chips */
+.genre-scroll::-webkit-scrollbar { display: none; }

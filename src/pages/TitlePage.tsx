@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { getNotes, setNotes, addRecentLookup } from '../lib/storage';
 import { getMovieDetails, getTVDetails, getWatchProviders } from '../lib/tmdb';
 import { getOMDBData } from '../lib/omdb';
-import { searchFreeSources } from '../lib/freeSourcesSearch';
+
 import {
   addToHistory, addToHidden, addToWatchlist, removeFromWatchlist,
   addRating, isTraktAuthenticated, getWatchedMovies, getWatchedShows,
@@ -32,16 +32,66 @@ interface RatingsData {
   rottenTomatoes: string | null;
 }
 
-interface FreeSource {
-  source: string;
-  name: string;
-  url: string;
-  type: 'free' | 'library';
-}
-
 interface WatchProviderInfo {
   name: string;
   logo: string;
+  type: 'flatrate' | 'free' | 'ads' | 'rent' | 'buy';
+  url: string;
+}
+
+/**
+ * Provider URL map — uses iOS universal links where possible.
+ * When the app is installed on iPhone, iOS intercepts these URLs
+ * and opens the native app instead of Safari. Native apps have
+ * built-in AirPlay, Roku cast, and Chromecast support.
+ */
+const PROVIDER_URLS: Record<string, (title: string) => string> = {
+  'Netflix': (t) => `https://www.netflix.com/search?q=${encodeURIComponent(t)}`,
+  'Amazon Prime Video': (t) => `https://app.primevideo.com/search?phrase=${encodeURIComponent(t)}`,
+  'Disney Plus': (t) => `https://www.disneyplus.com/search/${encodeURIComponent(t)}`,
+  'Hulu': (t) => `https://www.hulu.com/search?q=${encodeURIComponent(t)}`,
+  'Max': (t) => `https://play.max.com/search?q=${encodeURIComponent(t)}`,
+  'HBO Max': (t) => `https://play.max.com/search?q=${encodeURIComponent(t)}`,
+  'Apple TV Plus': (t) => `https://tv.apple.com/search?term=${encodeURIComponent(t)}`,
+  'Apple TV': (t) => `https://tv.apple.com/search?term=${encodeURIComponent(t)}`,
+  'Peacock': (t) => `https://www.peacocktv.com/watch/search?q=${encodeURIComponent(t)}`,
+  'Peacock Premium': (t) => `https://www.peacocktv.com/watch/search?q=${encodeURIComponent(t)}`,
+  'Paramount Plus': (t) => `https://www.paramountplus.com/search/?q=${encodeURIComponent(t)}`,
+  'Paramount+ with Showtime': (t) => `https://www.paramountplus.com/search/?q=${encodeURIComponent(t)}`,
+  'Tubi TV': (t) => `https://tubitv.com/search/${encodeURIComponent(t)}`,
+  'Pluto TV': (t) => `https://pluto.tv/search/details/${encodeURIComponent(t)}`,
+  'Crunchyroll': (t) => `https://www.crunchyroll.com/search?q=${encodeURIComponent(t)}`,
+  'YouTube': (t) => `https://www.youtube.com/results?search_query=${encodeURIComponent(t + ' full movie')}`,
+  'YouTube TV': (t) => `https://tv.youtube.com/search?q=${encodeURIComponent(t)}`,
+  'YouTube Premium': (t) => `https://www.youtube.com/results?search_query=${encodeURIComponent(t + ' full movie')}`,
+  'Vudu': (t) => `https://www.vudu.com/content/movies/search?searchString=${encodeURIComponent(t)}`,
+  'Fandango At Home': (t) => `https://www.vudu.com/content/movies/search?searchString=${encodeURIComponent(t)}`,
+  'Google Play Movies': (t) => `https://play.google.com/store/search?q=${encodeURIComponent(t)}&c=movies`,
+  'Microsoft Store': (t) => `https://www.microsoft.com/en-us/search/shop/movies-tv?q=${encodeURIComponent(t)}`,
+  'Amazon Video': (t) => `https://app.primevideo.com/search?phrase=${encodeURIComponent(t)}`,
+  'Starz': (t) => `https://www.starz.com/search?q=${encodeURIComponent(t)}`,
+  'Showtime': (t) => `https://www.sho.com/search?q=${encodeURIComponent(t)}`,
+  'Mubi': (t) => `https://mubi.com/en/search?query=${encodeURIComponent(t)}`,
+  'The Roku Channel': (t) => `https://therokuchannel.roku.com/search?q=${encodeURIComponent(t)}`,
+  'Plex': (t) => `https://watch.plex.tv/search?query=${encodeURIComponent(t)}`,
+  'Kanopy': (t) => `https://www.kanopy.com/search?query=${encodeURIComponent(t)}`,
+  'Hoopla': (t) => `https://www.hoopladigital.com/search?q=${encodeURIComponent(t)}&type=movie`,
+};
+
+function getProviderUrl(providerName: string, title: string, justWatchLink?: string): string {
+  const mapper = PROVIDER_URLS[providerName];
+  if (mapper) return mapper(title);
+  if (justWatchLink) return justWatchLink;
+  return `https://www.google.com/search?q=${encodeURIComponent(`watch ${title} on ${providerName}`)}`;
+}
+
+/**
+ * Open a streaming provider — navigates via location.href so iOS
+ * can intercept the URL and open the native app (universal link).
+ * target="_blank" anchors bypass this and always open Safari.
+ */
+function openProvider(url: string) {
+  window.location.href = url;
 }
 
 type TitleStatus = 'watched' | 'hidden' | 'watchlisted' | 'new';
@@ -52,8 +102,8 @@ export default function TitlePage() {
 
   const [titleData, setTitleData] = useState<TitleData | null>(null);
   const [ratings, setRatings] = useState<RatingsData>({ imdb: null, metacritic: null, rottenTomatoes: null });
-  const [freeSources, setFreeSources] = useState<FreeSource[]>([]);
   const [streamingProviders, setStreamingProviders] = useState<WatchProviderInfo[]>([]);
+  const [justWatchLink, setJustWatchLink] = useState<string | null>(null);
   const [notes, setNotesState] = useState('');
   const [userRating, setUserRating] = useState<number | null>(null);
   const [status, setStatus] = useState<TitleStatus>('new');
@@ -171,27 +221,25 @@ export default function TitlePage() {
           mediaType: titleInfo.mediaType,
         });
 
-        // Fetch OMDB ratings if imdbId available
+        // Fetch OMDB ratings — retry-enabled, with TMDB fallback
         if (titleInfo.imdbId) {
           try {
             const omdbRatings = await getOMDBData(titleInfo.imdbId);
-            if (omdbRatings) setRatings(omdbRatings);
+            // If OMDB returned nothing useful, fall back to TMDB's score
+            if (omdbRatings && (omdbRatings.imdb || omdbRatings.metacritic)) {
+              setRatings(omdbRatings);
+            } else if (titleInfo.tmdbRating > 0) {
+              setRatings({ imdb: Math.round(titleInfo.tmdbRating * 10) / 10, metacritic: null, rottenTomatoes: null });
+            }
           } catch (err) {
-            console.error('OMDB fetch failed:', err);
+            console.warn('[Ratings] OMDB failed, using TMDB fallback:', err);
+            if (titleInfo.tmdbRating > 0) {
+              setRatings({ imdb: Math.round(titleInfo.tmdbRating * 10) / 10, metacritic: null, rottenTomatoes: null });
+            }
           }
-        }
-
-        // Fetch free sources
-        try {
-          const sources = await searchFreeSources(
-            titleInfo.title,
-            titleInfo.year,
-            id,
-            titleInfo.mediaType,
-          );
-          setFreeSources(sources);
-        } catch (err) {
-          console.error('Free sources fetch failed:', err);
+        } else if (titleInfo.tmdbRating > 0) {
+          // No IMDB ID at all — use TMDB rating directly
+          setRatings({ imdb: Math.round(titleInfo.tmdbRating * 10) / 10, metacritic: null, rottenTomatoes: null });
         }
 
         // Fetch streaming providers
@@ -199,9 +247,17 @@ export default function TitlePage() {
           const providers = await getWatchProviders(id, titleInfo.mediaType);
           if (providers?.results?.US) {
             const us = providers.results.US;
+            if (us.link) setJustWatchLink(us.link);
             const allProviders: WatchProviderInfo[] = [];
             const seen = new Set<string>();
-            for (const list of [us.flatrate, us.free, us.ads, us.rent, us.buy]) {
+            const categories: Array<{ list: typeof us.flatrate; type: WatchProviderInfo['type'] }> = [
+              { list: us.free, type: 'free' },
+              { list: us.flatrate, type: 'flatrate' },
+              { list: us.ads, type: 'ads' },
+              { list: us.rent, type: 'rent' },
+              { list: us.buy, type: 'buy' },
+            ];
+            for (const { list, type } of categories) {
               if (list) {
                 for (const p of list) {
                   if (!seen.has(p.provider_name)) {
@@ -209,6 +265,8 @@ export default function TitlePage() {
                     allProviders.push({
                       name: p.provider_name,
                       logo: `https://image.tmdb.org/t/p/w92${p.logo_path}`,
+                      type,
+                      url: getProviderUrl(p.provider_name, titleInfo.title, us.link),
                     });
                   }
                 }
@@ -350,25 +408,25 @@ export default function TitlePage() {
         return {
           bg: 'rgba(34, 197, 94, 0.1)',
           color: 'var(--green)',
-          text: `✅ YOU'VE SEEN THIS${userRating ? ` — Rated ${userRating}/10` : ''}`,
+          text: `SEEN${userRating ? ` · ${userRating}/10` : ''}`,
         };
       case 'hidden':
         return {
           bg: 'rgba(239, 68, 68, 0.1)',
           color: 'var(--red)',
-          text: '❌ NEVER WATCHING',
+          text: 'HIDDEN',
         };
       case 'watchlisted':
         return {
           bg: 'rgba(59, 130, 246, 0.1)',
           color: 'var(--blue)',
-          text: '📋 ON YOUR WATCHLIST',
+          text: 'WATCHLIST',
         };
       default:
         return {
           bg: 'rgba(152, 152, 176, 0.1)',
           color: 'var(--text-secondary)',
-          text: '🆕 NEW TO YOU',
+          text: 'NEW TO YOU',
         };
     }
   };
@@ -376,8 +434,8 @@ export default function TitlePage() {
   if (loading) {
     return (
       <div style={{ padding: '16px', maxWidth: '480px', margin: '0 auto', textAlign: 'center', paddingTop: '60px' }}>
-        <div style={{ fontSize: '32px', marginBottom: '16px' }}>⏳</div>
-        <div style={{ color: 'var(--text-secondary)' }}>Loading title details...</div>
+        <div style={{ width: 24, height: 24, border: '2px solid var(--text-secondary)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.6s linear infinite', margin: '0 auto 16px' }} />
+        <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Loading...</div>
       </div>
     );
   }
@@ -385,7 +443,7 @@ export default function TitlePage() {
   if (error || !titleData) {
     return (
       <div style={{ padding: '16px', maxWidth: '480px', margin: '0 auto', textAlign: 'center', paddingTop: '60px' }}>
-        <div style={{ fontSize: '32px', marginBottom: '16px' }}>❌</div>
+        <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--red)', marginBottom: '16px' }}>Error</div>
         <div style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>{error || 'Title not found'}</div>
         <button
           onClick={() => navigate('/')}
@@ -401,26 +459,198 @@ export default function TitlePage() {
 
   return (
     <div style={{ padding: '0', maxWidth: '480px', margin: '0 auto', paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 16px))' }}>
-      {/* Back button */}
-      <button
-        onClick={() => navigate(-1)}
-        style={{
-          position: 'sticky', top: '0', left: '16px', background: 'rgba(10, 10, 15, 0.9)',
-          border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '20px',
-          padding: '12px', zIndex: 10, borderRadius: '8px', margin: '8px 0 0 8px',
-        }}
-      >
-        ←
-      </button>
+      {/* ── Cinematic Backdrop Header ── */}
+      {titleData.backdropUrl ? (
+        <div style={{ position: 'relative', width: '100%', aspectRatio: '16/9', overflow: 'hidden' }}>
+          <img
+            src={titleData.backdropUrl}
+            alt=""
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+          <div style={{
+            position: 'absolute', inset: 0,
+            background: 'linear-gradient(to top, var(--bg-primary) 0%, rgba(10,10,15,0.5) 50%, rgba(10,10,15,0.3) 100%)',
+          }} />
+          {/* Back button over backdrop */}
+          <button
+            onClick={() => navigate(-1)}
+            style={{
+              position: 'absolute', top: 12, left: 12, background: 'rgba(0,0,0,0.5)',
+              border: 'none', color: '#fff', cursor: 'pointer', fontSize: '18px',
+              padding: '8px 12px', zIndex: 10, borderRadius: '8px', backdropFilter: 'blur(8px)',
+            }}
+          >
+            ←
+          </button>
+          {/* Status pill over backdrop */}
+          <div style={{
+            position: 'absolute', top: 12, right: 12,
+            backgroundColor: banner.bg, color: banner.color,
+            padding: '6px 12px', borderRadius: '6px', fontSize: '11px', fontWeight: '600',
+            backdropFilter: 'blur(8px)',
+          }}>
+            {banner.text}
+            {saving && <span style={{ marginLeft: '6px', fontSize: '10px', opacity: 0.7 }}>saving...</span>}
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Fallback: no backdrop */}
+          <button
+            onClick={() => navigate(-1)}
+            style={{
+              background: 'rgba(10, 10, 15, 0.9)',
+              border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '20px',
+              padding: '12px', zIndex: 10, borderRadius: '8px', margin: '8px 0 0 8px',
+            }}
+          >
+            ←
+          </button>
+          <div style={{
+            backgroundColor: banner.bg, color: banner.color, padding: '12px', margin: '12px 16px',
+            borderRadius: '8px', fontSize: '13px', fontWeight: '500', textAlign: 'center',
+          }}>
+            {banner.text}
+            {saving && <span style={{ marginLeft: '8px', fontSize: '12px', opacity: 0.7 }}>saving...</span>}
+          </div>
+        </>
+      )}
 
-      {/* Status Banner */}
-      <div style={{
-        backgroundColor: banner.bg, color: banner.color, padding: '16px', margin: '16px',
-        borderRadius: '8px', fontSize: '14px', fontWeight: '500', textAlign: 'center',
-      }}>
-        {banner.text}
-        {saving && <span style={{ marginLeft: '8px', fontSize: '12px', opacity: 0.7 }}>saving...</span>}
-      </div>
+      {/* SMART WATCH — adapts to what's available, always leads to video */}
+      {(() => {
+        const streamable = streamingProviders.filter(p => p.type === 'flatrate' || p.type === 'free' || p.type === 'ads');
+        const rentBuy = streamingProviders.filter(p => p.type === 'rent' || p.type === 'buy');
+        const hasStreaming = streamable.length > 0;
+        const hasRentBuy = rentBuy.length > 0;
+        const hasEmbed = !!titleData.imdbId;
+        // Smart priority:
+        // - Has streaming? → streamer buttons are primary, embed is "Other sources"
+        // - No streaming but has embed? → embed is primary (new releases, obscure titles)
+        // - Neither? → Google fallback
+        return (
+          <div style={{ padding: '0 16px', marginBottom: '8px' }}>
+
+            {/* === CASE 1: Streaming available — opens native app via universal link === */}
+            {hasStreaming && (
+              <div style={{ marginBottom: '8px' }}>
+                {streamable.slice(0, 3).map((p, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => openProvider(p.url)}
+                    style={{
+                      width: '100%', padding: idx === 0 ? '16px' : '12px 16px',
+                      fontSize: idx === 0 ? '16px' : '14px', fontWeight: idx === 0 ? '700' : '500',
+                      background: idx === 0
+                        ? 'var(--accent)'
+                        : 'var(--bg-card)',
+                      color: idx === 0 ? 'white' : 'var(--text-primary)',
+                      border: idx === 0 ? 'none' : '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: '12px', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: '10px',
+                      textDecoration: 'none', marginBottom: '6px', boxSizing: 'border-box',
+                    }}
+                  >
+                    <img src={p.logo} alt={p.name} style={{ width: idx === 0 ? '26px' : '22px', height: idx === 0 ? '26px' : '22px', borderRadius: '4px' }} />
+                    <span style={{ flex: 1, textAlign: 'left' }}>
+                      {idx === 0 ? '▶ ' : ''}Watch on {p.name}
+                    </span>
+                    <span style={{ fontSize: '10px', opacity: 0.6 }}>
+                      {p.type === 'free' ? 'FREE' : p.type === 'ads' ? 'FREE w/ ADS' : 'STREAM'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* === CASE 2: No streaming — embed is primary === */}
+            {!hasStreaming && hasEmbed && (
+              <button
+                onClick={() => navigate(`/watch/${titleData.mediaType}/${titleData.imdbId}`)}
+                style={{
+                  width: '100%', padding: '16px', fontSize: '16px', fontWeight: '700',
+                  background: 'var(--accent)',
+                  color: 'white', border: 'none', borderRadius: '12px', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                  marginBottom: '8px',
+                }}
+              >
+                ▶ Watch Now
+              </button>
+            )}
+
+            {/* === Embed as secondary when streaming exists === */}
+            {hasStreaming && hasEmbed && (
+              <button
+                onClick={() => navigate(`/watch/${titleData.mediaType}/${titleData.imdbId}`)}
+                style={{
+                  width: '100%', padding: '12px', fontSize: '14px', fontWeight: '500',
+                  background: 'var(--bg-card)', color: 'var(--text-primary)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: '10px', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                  marginBottom: '8px',
+                }}
+              >
+                ▶ Other Sources
+              </button>
+            )}
+
+            {/* === Rent / Buy pills — also open app via universal link === */}
+            {hasRentBuy && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                {rentBuy.slice(0, 4).map((p, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => openProvider(p.url)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px',
+                      backgroundColor: 'var(--bg-card)', borderRadius: '8px', fontSize: '12px',
+                      color: 'var(--text-secondary)', cursor: 'pointer',
+                      border: '1px solid rgba(255,255,255,0.06)',
+                    }}
+                  >
+                    <img src={p.logo} alt={p.name} style={{ width: '16px', height: '16px', borderRadius: '3px' }} />
+                    {p.type === 'rent' ? 'Rent' : 'Buy'} on {p.name}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* === JustWatch === */}
+            {justWatchLink && (
+              <a
+                href={justWatchLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'block', textAlign: 'center', marginTop: '4px',
+                  fontSize: '12px', color: 'var(--text-secondary)', textDecoration: 'none',
+                }}
+              >
+                All streaming options on JustWatch ↗
+              </a>
+            )}
+
+            {/* === Nothing at all — Google fallback === */}
+            {!hasEmbed && !hasStreaming && !hasRentBuy && (
+              <a
+                href={`https://www.google.com/search?q=${encodeURIComponent(`watch ${titleData.title} ${titleData.year || ''} full movie online`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  width: '100%', padding: '16px', fontSize: '16px', fontWeight: '700',
+                  background: 'var(--accent)',
+                  color: 'white', border: 'none', borderRadius: '12px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                  textDecoration: 'none',
+                }}
+              >
+                ▶ Find Where to Watch
+              </a>
+            )}
+          </div>
+        );
+      })()}
 
       <div style={{ padding: '0 16px' }}>
         {/* Hero Section */}
@@ -440,7 +670,7 @@ export default function TitlePage() {
                 width: '100%', height: '100%', display: 'flex', alignItems: 'center',
                 justifyContent: 'center', fontSize: '40px', color: 'var(--text-secondary)',
               }}>
-                🎬
+                —
               </div>
             )}
           </div>
@@ -467,30 +697,92 @@ export default function TitlePage() {
           </div>
         </div>
 
-        {/* Ratings Row */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '24px' }}>
-          <div className="card" style={{ padding: '12px', textAlign: 'center' }}>
-            <div style={{ fontSize: '18px', fontWeight: '600', color: ratings.imdb ? 'var(--yellow)' : 'var(--text-secondary)' }}>
-              {ratings.imdb ? ratings.imdb.toFixed(1) : '—'}
+        {/* Overview — right under the title, like a logline */}
+        {titleData.overview && (
+          <p style={{
+            fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6',
+            margin: '0 0 20px 0', borderLeft: '3px solid var(--accent)',
+            paddingLeft: '12px',
+          }}>
+            {titleData.overview}
+          </p>
+        )}
+
+        {/* Ratings Row — Letterboxd & Metacritic are primary, IMDB secondary */}
+        {(() => {
+          const lbUrl = titleData.imdbId
+            ? `https://letterboxd.com/imdb/${titleData.imdbId}/`
+            : `https://letterboxd.com/search/${encodeURIComponent(titleData.title)}/`;
+
+          const cells: React.ReactNode[] = [];
+
+          // Letterboxd — always first, always shown, prominent
+          cells.push(
+            <a
+              key="lb"
+              href={lbUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="card"
+              style={{
+                padding: '10px 6px', textAlign: 'center', textDecoration: 'none',
+                cursor: 'pointer', border: '1px solid rgba(0,224,84,0.2)',
+              }}
+            >
+              <div style={{ fontSize: '16px', fontWeight: '700', color: '#00e054' }}>
+                ★
+              </div>
+              <div style={{ fontSize: '10px', color: '#00e054', marginTop: '3px', fontWeight: 600 }}>Letterboxd</div>
+            </a>
+          );
+
+          // Metacritic — second priority
+          if (ratings.metacritic) {
+            cells.push(
+              <a
+                key="mc"
+                href={`https://www.metacritic.com/search/${encodeURIComponent(titleData.title)}/`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="card"
+                style={{ padding: '10px 6px', textAlign: 'center', textDecoration: 'none', cursor: 'pointer' }}
+              >
+                <div style={{
+                  fontSize: '16px', fontWeight: '600',
+                  color: ratings.metacritic >= 60 ? 'var(--green)' : ratings.metacritic >= 40 ? 'var(--yellow)' : 'var(--red)',
+                }}>
+                  {ratings.metacritic}
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '3px' }}>Metacritic</div>
+              </a>
+            );
+          }
+
+          // IMDB — tertiary
+          if (ratings.imdb) {
+            cells.push(
+              <a
+                key="imdb"
+                href={titleData.imdbId ? `https://imdb.com/title/${titleData.imdbId}` : '#'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="card"
+                style={{ padding: '10px 6px', textAlign: 'center', textDecoration: 'none', cursor: 'pointer' }}
+              >
+                <div style={{ fontSize: '16px', fontWeight: '600', color: ratings.imdb >= 7 ? 'var(--green)' : 'var(--text-secondary)' }}>
+                  {ratings.imdb.toFixed(1)}
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '3px' }}>IMDB</div>
+              </a>
+            );
+          }
+
+          return (
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cells.length}, 1fr)`, gap: '6px', marginBottom: '16px' }}>
+              {cells}
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>IMDB</div>
-          </div>
-          <div className="card" style={{ padding: '12px', textAlign: 'center' }}>
-            <div style={{
-              fontSize: '18px', fontWeight: '600',
-              color: ratings.metacritic ? (ratings.metacritic >= 60 ? 'var(--green)' : ratings.metacritic >= 40 ? 'var(--yellow)' : 'var(--red)') : 'var(--text-secondary)',
-            }}>
-              {ratings.metacritic || '—'}
-            </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>Metacritic</div>
-          </div>
-          <div className="card" style={{ padding: '12px', textAlign: 'center' }}>
-            <div style={{ fontSize: '18px', fontWeight: '600', color: titleData.tmdbRating > 0 ? 'var(--blue)' : 'var(--text-secondary)' }}>
-              {titleData.tmdbRating > 0 ? titleData.tmdbRating.toFixed(1) : '—'}
-            </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>TMDB</div>
-          </div>
-        </div>
+          );
+        })()}
 
         {/* Action Buttons */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '24px' }}>
@@ -499,39 +791,42 @@ export default function TitlePage() {
             disabled={saving}
             style={{
               padding: '12px',
-              backgroundColor: status === 'watched' ? 'var(--green)' : 'rgba(34, 197, 94, 0.2)',
+              backgroundColor: status === 'watched' ? 'var(--green)' : 'transparent',
               color: status === 'watched' ? 'white' : 'var(--green)',
-              border: 'none', borderRadius: '8px', fontWeight: '500', cursor: 'pointer', fontSize: '14px',
+              border: status === 'watched' ? 'none' : '1px solid var(--green)',
+              borderRadius: '6px', fontWeight: '500', cursor: 'pointer', fontSize: '13px',
               opacity: saving ? 0.6 : 1,
             }}
           >
-            ✓ Seen It
+            Seen It
           </button>
           <button
             onClick={handleMarkHidden}
             disabled={saving}
             style={{
               padding: '12px',
-              backgroundColor: status === 'hidden' ? 'var(--red)' : 'rgba(239, 68, 68, 0.2)',
+              backgroundColor: status === 'hidden' ? 'var(--red)' : 'transparent',
               color: status === 'hidden' ? 'white' : 'var(--red)',
-              border: 'none', borderRadius: '8px', fontWeight: '500', cursor: 'pointer', fontSize: '14px',
+              border: status === 'hidden' ? 'none' : '1px solid var(--red)',
+              borderRadius: '6px', fontWeight: '500', cursor: 'pointer', fontSize: '13px',
               opacity: saving ? 0.6 : 1,
             }}
           >
-            ✕ Never
+            Never
           </button>
           <button
             onClick={handleMarkWatchlist}
             disabled={saving}
             style={{
               padding: '12px',
-              backgroundColor: status === 'watchlisted' ? 'var(--blue)' : 'rgba(59, 130, 246, 0.2)',
-              color: status === 'watchlisted' ? 'white' : 'var(--blue)',
-              border: 'none', borderRadius: '8px', fontWeight: '500', cursor: 'pointer', fontSize: '14px',
+              backgroundColor: status === 'watchlisted' ? 'var(--accent)' : 'transparent',
+              color: status === 'watchlisted' ? 'white' : 'var(--accent)',
+              border: status === 'watchlisted' ? 'none' : '1px solid var(--accent)',
+              borderRadius: '6px', fontWeight: '500', cursor: 'pointer', fontSize: '13px',
               opacity: saving ? 0.6 : 1,
             }}
           >
-            + Watchlist
+            Watchlist
           </button>
         </div>
 
@@ -582,17 +877,7 @@ export default function TitlePage() {
           </div>
         )}
 
-        {/* Overview */}
-        {titleData.overview && (
-          <div style={{ marginBottom: '24px' }}>
-            <h2 style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>
-              Overview
-            </h2>
-            <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.6', margin: '0' }}>
-              {titleData.overview}
-            </p>
-          </div>
-        )}
+        {/* Overview moved up near title for better storytelling */}
 
         {/* Notes */}
         <div style={{ marginBottom: '24px' }}>
@@ -611,86 +896,28 @@ export default function TitlePage() {
           />
         </div>
 
-        {/* Free Sources */}
-        {freeSources.length > 0 && (
-          <div style={{ marginBottom: '24px' }}>
-            <h2 style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>
-              🆓 Where to Watch Free
-            </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {freeSources.map((source, idx) => (
-                <a
-                  key={idx}
-                  href={source.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="card"
-                  style={{
-                    padding: '12px', textDecoration: 'none', color: 'var(--text-primary)',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  }}
-                >
-                  <span style={{ fontSize: '14px', fontWeight: '500' }}>{source.name}</span>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
-                    {source.type === 'library' ? '🎫 Library' : '📺 Free'}
-                  </span>
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Free sources removed — TMDB watch providers handle free streaming in the Watch section above */}
 
-        {/* Streaming Providers */}
-        {streamingProviders.length > 0 && (
-          <div style={{ marginBottom: '24px' }}>
-            <h2 style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>
-              📺 Also Available On
-            </h2>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-              {streamingProviders.slice(0, 8).map((p, idx) => (
-                <div key={idx} style={{
-                  display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px',
-                  backgroundColor: 'var(--bg-card)', borderRadius: '6px', fontSize: '12px',
-                  color: 'var(--text-secondary)',
-                }}>
-                  <img src={p.logo} alt={p.name} style={{ width: '20px', height: '20px', borderRadius: '4px' }} />
-                  {p.name}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Links */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '24px' }}>
-          {titleData.imdbId && (
-            <>
-              <a
-                href={`https://imdb.com/title/${titleData.imdbId}`}
-                target="_blank" rel="noopener noreferrer"
-                className="card"
-                style={{ padding: '12px', textAlign: 'center', textDecoration: 'none', color: 'var(--text-primary)', fontSize: '13px' }}
-              >
-                IMDB ↗
-              </a>
-              <a
-                href={`https://imdb.com/title/${titleData.imdbId}/rate`}
-                target="_blank" rel="noopener noreferrer"
-                className="card"
-                style={{ padding: '12px', textAlign: 'center', textDecoration: 'none', color: 'var(--text-primary)', fontSize: '13px' }}
-              >
-                Rate on IMDB ↗
-              </a>
-            </>
-          )}
+        {/* External links */}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', flexWrap: 'wrap' }}>
           <a
-            href={`https://letterboxd.com/search/${encodeURIComponent(titleData.title)}/`}
+            href={`https://www.kanopy.com/en/search?q=${encodeURIComponent(titleData.title)}`}
             target="_blank" rel="noopener noreferrer"
             className="card"
-            style={{ padding: '12px', textAlign: 'center', textDecoration: 'none', color: 'var(--text-primary)', fontSize: '13px' }}
+            style={{ padding: '10px 16px', textDecoration: 'none', color: 'var(--text-primary)', fontSize: '12px' }}
           >
-            Letterboxd ↗
+            Kanopy ↗
           </a>
+          {titleData.imdbId && (
+            <a
+              href={`https://letterboxd.com/imdb/${titleData.imdbId}/`}
+              target="_blank" rel="noopener noreferrer"
+              className="card"
+              style={{ padding: '10px 16px', textDecoration: 'none', color: '#00e054', fontSize: '12px' }}
+            >
+              Letterboxd ↗
+            </a>
+          )}
         </div>
       </div>
     </div>
