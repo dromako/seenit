@@ -1,72 +1,61 @@
-const CACHE_NAME = 'seenit-v1';
-const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/favicon.svg',
-  '/icons.svg',
+// SeenIt service worker.
+// Cache shell for offline use; network-first for TMDB API + images.
+const CACHE_NAME = 'seenit-v2';
+const SHELL = [
+  '/seenit/',
+  '/seenit/index.html',
+  '/seenit/app.js',
+  '/seenit/manifest.json',
+  '/seenit/favicon.svg',
+  '/seenit/icon-192.png',
+  '/seenit/icon-512.png',
 ];
 
-// Install — cache static shell
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
-  );
+self.addEventListener('install', (e) => {
+  e.waitUntil(caches.open(CACHE_NAME).then((c) => c.addAll(SHELL)).catch(() => {}));
   self.skipWaiting();
 });
 
-// Activate — clear old caches
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
   );
   self.clients.claim();
 });
 
-// Fetch — network-first for API calls, cache-first for static assets
-self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+self.addEventListener('fetch', (e) => {
+  if (e.request.method !== 'GET') return;
+  const url = new URL(e.request.url);
 
-  // Skip non-GET and cross-origin API calls
-  if (event.request.method !== 'GET') return;
+  // TMDB API: network-first, fall back to cache
+  if (url.hostname === 'api.themoviedb.org') {
+    e.respondWith(
+      fetch(e.request).then((res) => {
+        const clone = res.clone();
+        caches.open(CACHE_NAME).then((c) => c.put(e.request, clone)).catch(() => {});
+        return res;
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
 
-  // API calls: network-first
-  if (url.hostname.includes('api.trakt.tv') ||
-      url.hostname.includes('api.themoviedb.org') ||
-      url.hostname.includes('omdbapi.com')) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          return response;
+  // TMDB images: cache-first
+  if (url.hostname === 'image.tmdb.org') {
+    e.respondWith(
+      caches.match(e.request).then((cached) => cached ||
+        fetch(e.request).then((res) => {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then((c) => c.put(e.request, clone)).catch(() => {});
+          return res;
         })
-        .catch(() => caches.match(event.request))
+      )
     );
     return;
   }
 
-  // TMDB images: cache-first (they don't change)
-  if (url.hostname.includes('image.tmdb.org')) {
-    event.respondWith(
-      caches.match(event.request).then((cached) => {
-        if (cached) return cached;
-        return fetch(event.request).then((response) => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          return response;
-        });
-      })
-    );
-    return;
-  }
-
-  // Static assets: cache-first, fallback to network
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request);
-    })
+  // Shell: cache-first, fall back to network, fall back to /seenit/ (SPA)
+  e.respondWith(
+    caches.match(e.request).then((cached) => cached ||
+      fetch(e.request).catch(() => caches.match('/seenit/')))
   );
 });
